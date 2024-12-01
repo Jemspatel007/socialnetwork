@@ -1,0 +1,3 @@
+window.RUNTIME_ENV = {
+  REACT_APP_API_BASE_URL: '',
+};

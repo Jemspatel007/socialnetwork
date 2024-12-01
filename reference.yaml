@@ -1,0 +1,470 @@
+Description: >
+  A cloud formation for the term assignment of the cloud computing.
+
+Parameters:
+  DatabaseName:
+    Type: String
+    Default: Dalcollab
+    Description: Name of the database that will create
+
+  DBInstanceIdentifier:
+    Type: String
+    Default: DalCollabTerm
+    Description: Name of the RDS Instance
+
+  Username:
+    Type: String
+    Default: admin
+    Description: Username for the databaase
+
+  UserPassword:
+    Type: String
+    Default: jems007patel
+    NoEcho: true
+    Description: Password for that database
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Default: vpc-0b40e5e57dd682283
+    Description: Name of the vpc id where the RDS will launched
+
+  SnsTopicName:
+    Type: String
+    Default: DalcollabTerm
+    Description: Name of the sns topic
+  
+  Ec2InstanseName:
+    Type: String
+    Default: DalcollabTerm
+    Description: Name of the EC2 Instance
+
+  AccessKeyId:
+    Type: String
+    Default: /default_value/
+    Description: Name of the EC2 Instance
+    
+  SecretAccessKey:
+    Type: String
+    Default: /default_value/
+    Description: Name of the EC2 Instance
+
+  SessionToken:
+      Type: String
+      Default: /default_value/
+      Description: Name of the EC2 Instance
+
+Resources:
+  # Create a Security Group for RDS
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "For allowing the access of the mysql"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: "tcp"
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: "0.0.0.0/0"
+
+  # Create an RDS DB Instance
+  DalCollabRDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: 20
+      AvailabilityZone: "us-east-1a"
+      DBInstanceIdentifier: !Ref DBInstanceIdentifier
+      DBName: !Ref DatabaseName
+      DBInstanceClass: "db.t3.micro"
+      Engine: "mysql"
+      EngineVersion: "8.0.35"
+      MasterUsername: !Ref Username
+      MasterUserPassword: !Ref UserPassword
+      MultiAZ: false
+      Port: 3306
+      PubliclyAccessible: true
+      StorageEncrypted: false
+      StorageType: "gp2"
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+
+  # Create a Secrets Manager Secret for RDS
+  RDSSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: "DalCollabSecret"
+      Description: "Credentials for DalCollabRDSInstance"
+      SecretString: !Sub |
+        {
+          "username": "${Username}",
+          "password": "${UserPassword}",
+          "dbname": "${DatabaseName}",
+          "host": "${DalCollabRDSInstance.Endpoint.Address}",
+          "port": "3306"
+        }
+
+  # Create the SNS Topic
+  MySNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: DalCollab Email Service
+      TopicName: !Ref SnsTopicName
+
+  # Create the first Lambda function
+  SubscriptionLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: sendSubscription
+      Handler: index.lambda_handler
+      Role: arn:aws:iam::297323627892:role/LabRole
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+
+          sns_client = boto3.client('sns')
+
+          def lambda_handler(event, context):
+              try:        
+                  email = event.get('email', None)
+                  
+                  if not email:
+                      raise ValueError("Email is required")
+                  
+                  # Subscribe the user to the SNS topic
+                  response = sns_client.subscribe(
+                      TopicArn='!Ref MySNSTopic',
+                      Protocol='email',
+                      Endpoint=email,
+                      ReturnSubscriptionArn=True
+                  )
+                  
+                  subscription_arn = response['SubscriptionArn']
+                  
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps(f'Subscription initiated. Please check your email to confirm the subscription. SubscriptionArn: {subscription_arn}')
+                  }
+                  
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps(f"Error subscribing user: {str(e)}")
+                  }
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 128
+
+  # Create the second Lambda function
+  NotificationLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: sendNotificationProject
+      Handler: index.lambda_handler
+      Role: arn:aws:iam::297323627892:role/LabRole
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+
+          sns_client = boto3.client('sns')
+
+          def lambda_handler(event, context):
+              try:
+                  # Extract project and userList from the event
+                  project = event['project']
+                  userList = event['userList']
+                  
+                  # Construct the message
+                  message = (
+                      f"New Project Added!\n\n"
+                      f"Name: {project['name']}\n"
+                      f"Description: {project['description']}\n"
+                      f"GitHub Repo Link: {project['githubRepoLink']}"
+                  )
+                  
+                  # Publish message to each user email in userList
+                  for email in userList:
+                      response = sns_client.publish(
+                          TopicArn='!Ref MySNSTopic',
+                          Message=message,
+                          Subject='New Project Notification',
+                          MessageStructure='string'
+                      )
+                  
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps('Notification sent successfully!')
+                  }
+                  
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps(f"Error sending notification: {str(e)}")
+                  }
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 128
+
+  # Create the API Gateway REST API for the first Lambda function
+  ApiGatewayRestApiSubscription:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: ApiGatewayForSubscription
+      Description: API Gateway for handling subscriptions
+      FailOnWarnings: true
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # Create the API Gateway Resource for the first Lambda function
+  ApiGatewayResourceSendSubscription:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt ApiGatewayRestApiSubscription.RootResourceId
+      PathPart: sendSubscription
+      RestApiId: !Ref ApiGatewayRestApiSubscription
+
+  # Create the POST method for the API Gateway Resource for the first Lambda function
+  ApiGatewayMethodSendSubscriptionPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: POST
+      ResourceId: !Ref ApiGatewayResourceSendSubscription
+      RestApiId: !Ref ApiGatewayRestApiSubscription
+      Integration:
+        Credentials: arn:aws:iam::297323627892:role/LabRole
+        IntegrationHttpMethod: POST
+        Type: AWS
+        Uri:
+          Fn::Sub:
+            - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations
+            - LambdaArn: !GetAtt SubscriptionLambdaFunction.Arn
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: "{}"
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Credentials: "'true'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,access-control-allow-credentials'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS,DELETE'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Credentials: true
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+          ResponseModels:
+            application/json: "Empty"
+
+  # Create the OPTIONS method for CORS for the first Lambda function
+  ApiGatewayMethodSendSubscriptionOptions:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref ApiGatewayResourceSendSubscription
+      RestApiId: !Ref ApiGatewayRestApiSubscription
+      Integration:
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,access-control-allow-credentials'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS,DELETE'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Credentials: "'true'"
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Credentials: true
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # Create the API Gateway Deployment for the first Lambda function
+  ApiGatewayDeploymentSubscription:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - ApiGatewayMethodSendSubscriptionPost
+      - ApiGatewayMethodSendSubscriptionOptions
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApiSubscription
+      StageName: prod
+
+  # Grant API Gateway permission to invoke the Lambda function
+  LambdaApiGatewayInvokePermission1:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SubscriptionLambdaFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn:
+        Fn::Sub:
+          - arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApiSubscription}/*/POST/sendNotification
+          - { ApiGatewayRestApiSubscription: !Ref ApiGatewayRestApiSubscription }
+
+  # Create the API Gateway REST API for the second Lambda function
+  ApiGatewayRestApiNotification:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: ApiGatewayForNotification
+      Description: API Gateway for handling notifications
+      FailOnWarnings: true
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # Create the API Gateway Resource for the second Lambda function
+  ApiGatewayResourceSendNotification:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt ApiGatewayRestApiNotification.RootResourceId
+      PathPart: sendNotification
+      RestApiId: !Ref ApiGatewayRestApiNotification
+
+  # Create the POST method for the API Gateway Resource for the second Lambda function
+  ApiGatewayMethodSendNotificationPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: POST
+      ResourceId: !Ref ApiGatewayResourceSendNotification
+      RestApiId: !Ref ApiGatewayRestApiNotification
+      Integration:
+        Credentials: arn:aws:iam::297323627892:role/LabRole
+        IntegrationHttpMethod: POST
+        Type: AWS
+        Uri:
+          Fn::Sub:
+            - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations
+            - LambdaArn: !GetAtt NotificationLambdaFunction.Arn
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: "{}"
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Credentials: "'true'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,access-control-allow-credentials'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS,DELETE'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Credentials: true
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+          ResponseModels:
+            application/json: "Empty"
+
+  # Create the OPTIONS method for CORS for the second Lambda function
+  ApiGatewayMethodSendNotificationOptions:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref ApiGatewayResourceSendNotification
+      RestApiId: !Ref ApiGatewayRestApiNotification
+      Integration:
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,access-control-allow-credentials'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS,DELETE'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Credentials: "'true'"
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Credentials: true
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # Create the API Gateway Deployment for the second Lambda function
+  ApiGatewayDeploymentNotification:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - ApiGatewayMethodSendNotificationPost
+      - ApiGatewayMethodSendNotificationOptions
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApiNotification
+      StageName: prod
+
+  # Grant API Gateway permission to invoke the Lambda function
+  LambdaApiGatewayInvokePermission2:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref NotificationLambdaFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn:
+        Fn::Sub:
+          - arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApiNotification}/*/POST/sendNotification
+          - { ApiGatewayRestApiNotification: !Ref ApiGatewayRestApiNotification }
+
+  MyEC2Instance:
+    Type: AWS::EC2::Instance
+    DependsOn: RDSSecret
+    Properties:
+      InstanceType: t2.micro
+      KeyName: jemskey
+      ImageId: ami-0ba9883b710b05ac6 
+      SecurityGroupIds:
+        - !Ref MySecurityGroup
+      IamInstanceProfile: !Ref MyInstanceProfile
+      Tags:
+        - Key: Name
+          Value: !Ref Ec2InstanseName
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          sudo yum update -y
+          sudo yum install -y docker
+          sudo service docker start
+          sudo usermod -a -G docker ec2-user
+          
+          # Pulling the Docker images
+          docker pull jems007patel/backend-dalcollab
+          docker pull jems007patel/frontend-dalcollab
+          
+          # Running the Docker containers
+          docker run -d -p 8080:8080 \
+               -e AWS_ACCESS_KEY=${AccessKeyId} \
+               -e AWS_SECRET_KEY=${SecretAccessKey} \
+               -e AWS_SESSION_TOKEN=${SessionToken} \
+               -e SECRET_MANAGER_NAME=DalCollabSecret \
+               --name backend jems007patel/backend-dalcollab
+          docker run -d -p 3000:3000 --name frontend jems007patel/frontend-dalcollab
+
+  MySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group with custom inbound rules
+      SecurityGroupIngress:
+        - IpProtocol: -1 
+          FromPort: -1   
+          ToPort: -1     
+          CidrIp: 0.0.0.0/0 
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0 
+      Tags:
+        - Key: Name
+          Value: MySecurityGroup
+
+  MyInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - EMR_EC2_DefaultRole

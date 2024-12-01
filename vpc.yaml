@@ -1,0 +1,200 @@
+  AWSTemplateFormatVersion: '2010-09-09'
+  Description: CloudFormation Template for VPC with Public and Private Subnets, and RDS instance with default credentials
+
+  Resources:
+    # Step 1: VPC
+    MyVPC:
+      Type: AWS::EC2::VPC
+      Properties:
+        CidrBlock: 10.0.0.0/16
+        EnableDnsSupport: true
+        EnableDnsHostnames: true
+        Tags:
+          - Key: Name
+            Value: MyVPC
+
+    # Step 2: Internet Gateway
+    MyInternetGateway:
+      Type: AWS::EC2::InternetGateway
+      Properties:
+        Tags:
+          - Key: Name
+            Value: MyInternetGateway
+
+    # Attach Internet Gateway to VPC
+    AttachGateway:
+      Type: AWS::EC2::VPCGatewayAttachment
+      Properties:
+        VpcId: !Ref MyVPC
+        InternetGatewayId: !Ref MyInternetGateway
+
+    # Step 3: Public Subnet
+    PublicSubnet:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref MyVPC
+        CidrBlock: 10.0.1.0/24
+        MapPublicIpOnLaunch: true
+        AvailabilityZone: !Select [0, !GetAZs '']
+        Tags:
+          - Key: Name
+            Value: PublicSubnet
+
+    # Step 4: Private Subnet 1
+    PrivateSubnet1:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref MyVPC
+        CidrBlock: 10.0.2.0/24
+        AvailabilityZone: !Select [1, !GetAZs '']
+        Tags:
+          - Key: Name
+            Value: PrivateSubnet1
+
+    # Step 5: Private Subnet 2 (New Private Subnet)
+    PrivateSubnet2:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref MyVPC
+        CidrBlock: 10.0.3.0/24  # New CIDR Block for second private subnet
+        AvailabilityZone: !Select [2, !GetAZs '']  # Choose another AZ if available
+        Tags:
+          - Key: Name
+            Value: PrivateSubnet2
+
+    # Step 6: Public Route Table
+    PublicRouteTable:
+      Type: AWS::EC2::RouteTable
+      Properties:
+        VpcId: !Ref MyVPC
+        Tags:
+          - Key: Name
+            Value: PublicRouteTable
+
+    # Public Route to the Internet Gateway
+    PublicRoute:
+      Type: AWS::EC2::Route
+      Properties:
+        RouteTableId: !Ref PublicRouteTable
+        DestinationCidrBlock: 0.0.0.0/0
+        GatewayId: !Ref MyInternetGateway
+
+    # Associate Public Subnet with Public Route Table
+    PublicSubnetRouteTableAssociation:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        SubnetId: !Ref PublicSubnet
+        RouteTableId: !Ref PublicRouteTable
+
+    # Step 7: Private Route Table for Private Subnet 1
+    PrivateRouteTable1:
+      Type: AWS::EC2::RouteTable
+      Properties:
+        VpcId: !Ref MyVPC
+        Tags:
+          - Key: Name
+            Value: PrivateRouteTable1
+
+    # Associate Private Subnet 1 with Private Route Table
+    PrivateSubnetRouteTableAssociation1:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        SubnetId: !Ref PrivateSubnet1
+        RouteTableId: !Ref PrivateRouteTable1
+
+    # Step 8: Private Route Table for Private Subnet 2 (New Private Route Table)
+    PrivateRouteTable2:
+      Type: AWS::EC2::RouteTable
+      Properties:
+        VpcId: !Ref MyVPC
+        Tags:
+          - Key: Name
+            Value: PrivateRouteTable2
+
+    # Associate Private Subnet 2 with Private Route Table
+    PrivateSubnetRouteTableAssociation2:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        SubnetId: !Ref PrivateSubnet2
+        RouteTableId: !Ref PrivateRouteTable2
+    # Step 9: Frontend Security Group
+    FrontendSG:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Allow HTTP, HTTPS, and SSH access for Frontend
+        VpcId: !Ref MyVPC
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 80
+            ToPort: 80
+            CidrIp: 0.0.0.0/0
+          - IpProtocol: tcp
+            FromPort: 443
+            ToPort: 443
+            CidrIp: 0.0.0.0/0
+          - IpProtocol: tcp
+            FromPort: 22
+            ToPort: 22
+            CidrIp: 0.0.0.0/0
+        Tags:
+          - Key: Name
+            Value: FrontendSG
+
+    # Step 10: Backend Security Group
+    BackendSG:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Allow access from Frontend to Backend
+        VpcId: !Ref MyVPC
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 8000
+            ToPort: 8000
+            SourceSecurityGroupId: !Ref FrontendSG
+        Tags:
+          - Key: Name
+            Value: BackendSG
+
+    # Step 11: Database Security Group
+    DatabaseSG:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Allow access from Backend to Database
+        VpcId: !Ref MyVPC
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+            SourceSecurityGroupId: !Ref BackendSG
+        Tags:
+          - Key: Name
+            Value: DatabaseSG
+            
+# Step 12: EC2 Instance for Frontend
+    BackendEC2Instance:
+      Type: AWS::EC2::Instance
+      Properties:
+        InstanceType: t2.micro
+        KeyName: jems
+        SubnetId: !Ref PublicSubnet
+        SecurityGroupIds:
+          - !Ref FrontendSG
+        ImageId: ami-0ba9883b710b05ac6
+        Tags:
+          - Key: Name
+            Value: FrontendEC2Instance
+        UserData: 
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            # Update and Install Docker
+            sudo yum update -y
+            sudo yum install -y docker
+            sudo service docker start
+            sudo usermod -a -G docker ec2-user
+
+            # Pulling the Docker Frontend image
+            docker pull jems007patel/frontend-socialnetwork
+
+            # Running the Docker container for Frontend
+            docker run -d -p 80:80 \
+              --name frontend jems007patel/frontend-socialnetwork
