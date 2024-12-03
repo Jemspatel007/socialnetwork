@@ -52,7 +52,7 @@ function registerAction(userData) {
                 dispatch(registerSuccess(response.message));
 
                 // Extract email from userData
-                const email = userData.email;
+                const email = userData.username;
 
                 // Call the SNS API directly using fetch
                 fetch('https://mifllmhwt9.execute-api.us-east-1.amazonaws.com/dev/sns/createTopic', {
@@ -99,7 +99,7 @@ function loginAction(username, password) {
                 dispatch(loginSuccess());
 
                 // Extract email from response (Assuming email is available in the response object)
-                const email = response.email; // You may need to adjust this depending on your response structure
+                const email = username; // You may need to adjust this depending on your response structure
                 const message = "You logged in successfully in Social Network"; // Customize the message as needed
 
                 // Call the SNS API directly using fetch to send the notification
