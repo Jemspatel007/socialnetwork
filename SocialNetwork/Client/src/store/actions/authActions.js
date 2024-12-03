@@ -51,10 +51,11 @@ function registerAction(userData) {
             if (response.success === true) {
                 dispatch(registerSuccess(response.message));
 
-                // Extract email from userData
-                const email = userData.username;
+                // Extract the username and email from userData
+                const username = userData.username;
+                const email = userData.email;
 
-                // Call the SNS API directly using fetch
+                // Call the SNS API to create the topic and subscribe the email
                 fetch('https://mifllmhwt9.execute-api.us-east-1.amazonaws.com/dev/sns/createTopic', {
                     method: 'POST',
                     headers: {
@@ -62,7 +63,8 @@ function registerAction(userData) {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        email: email
+                        username: username,  // Use username as topic name
+                        email: email         // Subscribe the email to the topic
                     })
                 })
                 .then(response => response.json())  // Parse the JSON response
@@ -98,11 +100,10 @@ function loginAction(username, password) {
                 saveToken(response);
                 dispatch(loginSuccess());
 
-                // Extract email from response (Assuming email is available in the response object)
-                const email = username; // You may need to adjust this depending on your response structure
+                // Assuming the username is unique, use it to send the notification
                 const message = "You logged in successfully in Social Network"; // Customize the message as needed
 
-                // Call the SNS API directly using fetch to send the notification
+                // Call the SNS API directly using fetch to send the notification to all subscribers of the topic
                 fetch('https://mifllmhwt9.execute-api.us-east-1.amazonaws.com/dev/sns/sendNotification', {
                     method: 'POST',
                     headers: {
@@ -110,8 +111,8 @@ function loginAction(username, password) {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        email: email,
-                        message: message
+                        username: username,  // Use username to identify the SNS topic
+                        message: message      // Custom message to be sent to all subscribers
                     })
                 })
                 .then(response => response.json())  // Parse the JSON response
@@ -140,6 +141,7 @@ function logoutAction() {
         dispatch(logoutSuccess())
     }
 }
+
 
 function saveToken(response) {
     const token = response.split(' ')[1];
