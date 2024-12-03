@@ -45,36 +45,92 @@ function logoutSuccess() {
 function registerAction(userData) {
     return (dispatch) => {
         dispatch(ajaxBegin());
+        console.log(userData);
+
         return requester.post('/users/register', { ...userData }, (response) => {
             if (response.success === true) {
-                dispatch(registerSuccess(response.message))
+                dispatch(registerSuccess(response.message));
+
+                // Extract email from userData
+                const email = userData.email;
+
+                // Call the SNS API directly using fetch
+                fetch('https://mifllmhwt9.execute-api.us-east-1.amazonaws.com/dev/sns/createTopic', {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: email
+                    })
+                })
+                .then(response => response.json())  // Parse the JSON response
+                .then((snsResponse) => {
+                    // Handle the response from the SNS API
+                    console.log(snsResponse);
+                })
+                .catch((err) => {
+                    // Handle errors in calling the SNS API
+                    console.error("Error calling SNS API: ", err.message);
+                });
+
             } else {
-                dispatch(registerError(response.message))
+                dispatch(registerError(response.message));
             }
             dispatch(ajaxEnd());
         }).catch(err => {
             dispatch(registerError(`${err.message}`));
             dispatch(ajaxEnd());
-        })
+        });
     }
 }
 
 function loginAction(username, password) {
     return (dispatch) => {
         dispatch(ajaxBegin());
+        
         return requester.post('/login', { username, password }, (response) => {
             if (response.error) {
-                dispatch(loginError(' Incorrect credentials!'));
+                dispatch(loginError('Incorrect credentials!'));
             } else {
-                saveToken(response)
+                // Save the token if login is successful
+                saveToken(response);
                 dispatch(loginSuccess());
+
+                // Extract email from response (Assuming email is available in the response object)
+                const email = response.email; // You may need to adjust this depending on your response structure
+                const message = "DP1 is completed successfully"; // Customize the message as needed
+
+                // Call the SNS API directly using fetch to send the notification
+                fetch('https://mifllmhwt9.execute-api.us-east-1.amazonaws.com/dev/sns/sendNotification', {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: email,
+                        message: message
+                    })
+                })
+                .then(response => response.json())  // Parse the JSON response
+                .then((snsResponse) => {
+                    // Handle the response from the SNS API (optional)
+                    console.log(snsResponse);
+                })
+                .catch((err) => {
+                    // Handle errors in calling the SNS API
+                    console.error("Error calling SNS API: ", err.message);
+                });
             }
+
             dispatch(ajaxEnd());
         }).catch(err => {
             localStorage.clear();
             dispatch(loginError(`${err.message}`));
             dispatch(ajaxEnd());
-        })
+        });
     }
 }
 
