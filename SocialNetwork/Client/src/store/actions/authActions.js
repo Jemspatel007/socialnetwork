@@ -100,7 +100,7 @@ function loginAction(username, password) {
 
                 // Extract email from response (Assuming email is available in the response object)
                 const email = response.email; // You may need to adjust this depending on your response structure
-                const message = "DP1 is completed successfully"; // Customize the message as needed
+                const message = "You logged in successfully in Social Network"; // Customize the message as needed
 
                 // Call the SNS API directly using fetch to send the notification
                 fetch('https://mifllmhwt9.execute-api.us-east-1.amazonaws.com/dev/sns/sendNotification', {
