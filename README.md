@@ -168,4 +168,6 @@ This project demonstrates a scalable and secure cloud architecture that adheres 
 
 For questions or contributions, please contact: **Jems Patel**\
 Email: [jems007patel@gmail.com](mailto\:jems007patel@gmail.com)\
-GitHub: [Jemspatel007](https://github.com/Jemspatel007)
+GitHub: [Jemspatel007](https://github.com/Jemspatel007)\
+LinkedIn: [View My Post](https://www.linkedin.com/posts/jemspatel007_cloud-devops-aws-activity-7275680609207783424-26MW?utm_source=share&utm_medium=member_desktop)
+
